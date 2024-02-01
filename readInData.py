@@ -7,7 +7,7 @@ def main():
         choice = int(input("Enter 1 to read in training data, 2 to process test data: "))
         if choice ==1 or choice ==2:
             keepGoing =False
-    idList,seekerConv,recommenderConv,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance = readInData(choice)
+    idList,seekerConv,recommenderConv,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,preservedOrder = readInData(choice)
     scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance,seekerConv,recommenderConv,choice)      
     #showHistograms(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance,seekerConv,recommenderConv)
         
@@ -16,14 +16,16 @@ def main():
 #Data in the file is delimited by |= 
 def readInData(choice):
     if choice == 1:
-        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\E-Redial\\dataset\\TRAIN_combinedData.csv'
+        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\TRAIN_combinedData.txt'
     else:
-        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\E-Redial\\dataset\\TEST_combinedData.csv'
+        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\TEST_combinedData.txt'
     idList = []
     seekerConv = []
     tempSeekerConv = []
     recommenderConv = []
     tempRecommenderConv=[]
+    tempPreservedOrder = []
+    preservedOrder = []
     length = []
     repetition = []
     readability = []
@@ -50,6 +52,7 @@ def readInData(choice):
             polarity.append(float(row[8]))
             grammar.append(float(row[9]))
             featureAppearance.append(float(row[10]))
+            tempPreservedOrder.append(row[11])
    
     #Convert strings read in from file into true lists for seeker and recommender conversations
     for j , item in enumerate(tempSeekerConv):
@@ -58,7 +61,10 @@ def readInData(choice):
     for j , item in enumerate(tempRecommenderConv):
         convertedList = eval(tempRecommenderConv[j])
         recommenderConv.append(convertedList)
-    return idList,seekerConv,recommenderConv,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance
+    for j, item in enumerate(tempPreservedOrder):
+        convertedList = eval(tempPreservedOrder[j])
+        preservedOrder.append(convertedList)
+    return idList,seekerConv,recommenderConv,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance, preservedOrder
 
 
     

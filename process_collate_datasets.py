@@ -43,20 +43,22 @@ def main():
             keepGoing =False
         
     if choice == 1:
-        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\E-Redial\\dataset\\eredial.json'
-        Inspired_path = "C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\Inspired\\data\\dialog_data\\train.tsv"
-        writeFile = 'E-redial-ALT-TRAINING-LABELS.txt'
+        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\eredial.json'
+        Inspired_path = "C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\inspired_train.tsv"
+        
     else:
-        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\E-Redial\\dataset\\test.json'
-        Inspired_path = "C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\Inspired\\data\\dialog_data\\test.tsv"
-        writeFile = 'E-redial-TEST-LABELS.txt'
+        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\eredial_test.json'
+        Inspired_path = "C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\inspired_test.tsv"
+        
     
     spell_check =  SpellChecker()
-    Inspired_path = "C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\Inspired\\data\\dialog_data\\train.tsv"
 
 
-    idList,wholeConv = collectEredialData(filename)
-    idList,wholeConv, movies = collectInspiredData(Inspired_path, idList, wholeConv)
+    idList,wholeConv,preservedConversation = collectEredialData(filename)
+    idList,wholeConv, movies,preservedConversation = collectInspiredData(Inspired_path, idList, wholeConv,preservedConversation)
+    
+    goodConvs = combineConsecutiveSpeakerSentences(idList,preservedConversation)
+    
     #Quality Factor calculations
     lenScores = scoreLength(idList,wholeConv)
     readScores = scoreReadability(idList,wholeConv)
@@ -68,12 +70,13 @@ def main():
     faScores = scoreFeatureAppearance(idList, wholeConv)
     dataDict = crunchStats(lenScores,readScores,wiScores,repScores,subScores,polScores,gramScores, faScores)
     
+    '''
     #Write stats of quality factor to a file
     writeQFStats(dataDict, choice)
 
     #Write dataset to file
-    writeCombinedData(idList,wholeConv, lenScores, readScores, wiScores,repScores,subScores,polScores,gramScores,faScores, choice)
-
+    writeCombinedData(idList,wholeConv, lenScores, readScores, wiScores,repScores,subScores,polScores,gramScores,faScores, goodConvs, choice)
+    '''
 
     return
  
@@ -558,7 +561,7 @@ def collectEredialData(filename):
     idList = []                     #[conv ID]
     
     
-    forPretrainConv = []#{}         #Late addition added to ensure order is preserved to proper position embeddings can be added for pretrained model tokenize and stuff
+    preservedConversation = {}         #Late addition added to ensure order is preserved to proper position embeddings can be added for pretrained model tokenize and stuff
     convRolesList = []
 
     #This will loop through each entry, 1 conversation at a time
@@ -605,8 +608,12 @@ def collectEredialData(filename):
             sentence = dictionary['text']
             #Determine who is speaking
             role = dictionary['role']
+            if role == 1:
+                textRole = "RECOMMENDER"
+            else:
+                textRole = "SEEKER"
             curRoles.append(role)
-            preservedOrderList.append([role,sentence])
+            preservedOrderList.append([textRole,sentence])
             
             #Manage conversation turn tracking 
             if role == 1:
@@ -684,13 +691,13 @@ def collectEredialData(filename):
         moviesDict[hash(id)] = fullMovieData
         convRolesList.append(curRoles)
         #Preserve the order in which the entire conversation was spoken
-        forPretrainConv.append(preservedOrderList)
+        preservedConversation[hash(id)] = preservedOrderList
 
     #add on whatever else as necessary
-    return idList, wholeConv
+    return idList, wholeConv, preservedConversation
 
 #Get data from inspired dataset    
-def collectInspiredData(Inspired_path, idList, wholeConv):
+def collectInspiredData(Inspired_path, idList, wholeConv,preservedConversation):
     seeker_list = []
     recommender_list = []
     movies = {}
@@ -703,6 +710,7 @@ def collectInspiredData(Inspired_path, idList, wholeConv):
         last_convid = ""
         dialog = []
         dialog_list = collections.OrderedDict()
+        preservedOrderList = []
             
         seeker_intend_info = collections.OrderedDict({"movie":[], "genre":[], "people_name":[]})
         recommender_intend_info = collections.OrderedDict({"movie":[], "genre":[], "people_name":[]})
@@ -715,13 +723,16 @@ def collectInspiredData(Inspired_path, idList, wholeConv):
             role = row[2]
             utterance = row[5]
             strategy = row[14]
-
+            preservedOrderList.append([role,row[4]])
             
             movies[hash(conv_idx)] = row[9]
             if (last_convid != "") and (last_convid != conv_idx):
                 wholeConv[hash(last_convid)] = [recommender_list,seeker_list]
+                preservedConversation[hash(last_convid)] = preservedOrderList
+                preservedOrderList= []
                 recommender_list = []
                 seeker_list = []
+                
             
             
             if strategy == "transparency":
@@ -834,7 +845,7 @@ def collectInspiredData(Inspired_path, idList, wholeConv):
             
         #Add last entry
         wholeConv[hash(last_convid)] = [recommender_list,seeker_list]
-        
+        preservedConversation[hash(last_convid)] = preservedOrderList
         
         #Convert movies to just movie names, removing year markers
         for key in movies.keys():
@@ -846,20 +857,50 @@ def collectInspiredData(Inspired_path, idList, wholeConv):
             temp_list = [title.split(' (')[0] for title in temp_list]
             movies[key] = temp_list
         
-        return idList, wholeConv, movies
+        return idList, wholeConv, movies, preservedConversation
 
-    
+#Takes in a dictionary of conversations, and the idlist which is the keys to that dictionary
+#Goes through and combines each conversation so that any consecutive messages from a speaker are 
+#joined into one entry, that way each conversation has the form speaker 1, speaker 2 speaker 1 for consistency
+def combineConsecutiveSpeakerSentences(idList, preservedConversation):
+    joined_strings_list = []
+
+    for id, conv in zip(idList, preservedConversation):
+        current = preservedConversation[hash(id)]
+        joined_strings = []
+        current_role = None
+        current_string = ""
+
+        for role, text in current:
+            if current_role is None:
+                # First iteration
+                current_role = role
+                current_string = text
+            elif current_role == role:
+                # Same role, concatenate the strings
+                current_string += " " + text
+            else:
+                # Different role, start a new string
+                joined_strings.append(current_role + ': ' +current_string)
+                current_role = role
+                current_string = text
+
+        # Append the last string
+        joined_strings.append(current_string)
+        joined_strings_list.append(joined_strings)
+
+    return joined_strings_list    
 #Takes in a list of conversation IDs, and a dictionary of conversations where the key is in the parallel IDlist. Also accepts lists of score values that are all parallel arrays.
 #Will write the data to the file in csv format as: id,seekerconv,recommenderConv,length score,readabilityscores, word importance score, repitition score, 
 #subjectivity score, polarity score, grammar score, featuer appearance score
     
-def writeCombinedData(idList,wholeConv, lenScores, readScores, wiScores,repScores,subScores,polScores,gramScores,faScores, fileChoice):
+def writeCombinedData(idList,wholeConv, lenScores, readScores, wiScores,repScores,subScores,polScores,gramScores,faScores,preservedConversation, fileChoice):
     if fileChoice == 1:
-        outFile = open('TRAIN_combinedData.csv','w', encoding='utf-8')
+        outFile = open('TRAIN_combinedData.txt','w', encoding='utf-8')
     else:
-        outFile = open('TEST_combinedData.csv','w', encoding='utf-8')
+        outFile = open('TEST_combinedData.txt','w', encoding='utf-8')
     for x, id in enumerate(idList):
-        outFile.write(f'{id}|={wholeConv[hash(id)][1]}|={wholeConv[hash(id)][0]}|={lenScores[x]}|={readScores[x]}|={wiScores[x]}|={repScores[x]}|={subScores[x]}|={polScores[x]}|={gramScores[x]}|={faScores[x]}\n') 
+        outFile.write(f'{id}|={wholeConv[hash(id)][1]}|={wholeConv[hash(id)][0]}|={lenScores[x]}|={readScores[x]}|={wiScores[x]}|={repScores[x]}|={subScores[x]}|={polScores[x]}|={gramScores[x]}|={faScores[x]}|={preservedConversation[x]}\n') 
     outFile.close()
 
 #
