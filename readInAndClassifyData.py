@@ -15,7 +15,7 @@ def main():
 #Open up the file, store the data with each column in its own array.
 #Data in the file is delimited by |= 
 def readInData(choice):
-    if choice == 1:
+    if choice == 1 or choice =='training':
         filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\TRAIN_combinedData.txt'
     else:
         filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\TEST_combinedData.txt'
@@ -66,9 +66,21 @@ def readInData(choice):
         preservedOrder.append(convertedList)
     return idList,seekerConv,recommenderConv,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance, preservedOrder
 
+#Reads in label Data. Data comes as ConvID,Label
+def readInLabels(choice):
+    if choice == 1 or choice =='training':
+        filename='TRAIN_Labels_combinedData.csv'
+    else:
+        filename='TEST_Labels__combinedData.csv'
 
-    
-    
+    labels = []
+    with open(filename, "r", encoding='utf-8') as file:
+        for line in file:
+            cur = line.split(',')
+            labels.append(cur[1]) #Label is the 2nd element on the line. Ignore convID
+
+    return labels
+
 #Score conversation based on breakpoints observed in data / having desirable conditions
 def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance,seekerConv,recommenderConv,choice):
     if choice == 1:

@@ -15,8 +15,8 @@ import json
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import pandas as pd
+from readInDataAndClassifyDData.py import readInData,readInLabels
 
-# Test data 756 long. 756 / 18 == 42 even runs through data.
 TRAIN_BATCH_SIZE = 4
 TEST_BATCH_SIZE = 5
 NUM_EPOCHS = 60
@@ -37,76 +37,6 @@ else:
     device = ("cpu")
 
 
-# Get the input data from the file
-def get_input_data(filename):
-    # Open jsonFile
-    with open(filename, 'r', encoding='utf-8') as f:
-        messages = json.load(f)
-
-    # Loop through message and grab sentences
-    forPretrainConv = []
-    convRoleList = []
-    for message in messages:
-        preservedOrderList = []
-        cur_roles = []
-        workin = message['messages']
-        for dictionary in workin:
-            role = dictionary['role']
-
-            # Adjust 0 role to 2 for NN processing later
-            if role == 0:
-                role = 2
-            cur_roles.append(role)
-            sentence = dictionary['text']
-            preservedOrderList.append(sentence)  # Add sentence to this conversation
-
-        # add conversation to list of conversations
-        convRoleList.append(cur_roles)
-        forPretrainConv.append(preservedOrderList)
-        joinedConversations = combineConsecutiveSpeakerSentences(forPretrainConv, convRoleList)
-    # return forPretrainConv, convRoleList
-    return joinedConversations
-
-
-def combineConsecutiveSpeakerSentences(input_lists, roles_list):
-    joined_strings_list = []
-
-    for input_list, role_list in zip(input_lists, roles_list):
-        joined_strings = []
-        current_role = None
-        current_string = ""
-
-        for text, role in zip(input_list, role_list):
-            if current_role is None:
-                # First iteration
-                current_role = role
-                current_string = text
-            elif current_role == role:
-                # Same role, concatenate the strings
-                current_string += " " + text
-            else:
-                # Different role, start a new string
-                joined_strings.append(current_string)
-                current_role = role
-                current_string = text
-
-        # Append the last string
-        joined_strings.append(current_string)
-        joined_strings_list.append(joined_strings)
-
-    return joined_strings_list
-
-# Get target data from the file  # Data stored as convID,target
-def get_target_data(filename):
-    targets = []
-    with open(filename, 'r') as file:
-        for line in file:
-            values = line.strip().split(',')
-            # Ignore convID, just grab target label, convert to tensor
-            targets.append(torch.tensor(int(values[1])))
-
-    return np.array(targets)
-
 
 # Function to pad conversations to a common length
 def pad_conversations(conversations):
@@ -122,7 +52,6 @@ def pad_conversations(conversations):
 class encoderNetwork(Dataset):
     def __init__(self, conversations, targets, tokenizer):
         self.conversations = conversations  # data
-        # self.roles = roles  # Role information
         self.targets = targets  # Target Labels
         self.tokenizer = tokenizer  # GPT-2 tokenizer
 
@@ -135,15 +64,15 @@ class encoderNetwork(Dataset):
         text = " ".join(self.conversations[idx])
         encoding = self.tokenizer(text, padding=True, truncation=True, return_tensors="pt")
 
-        input_ids = encoding["input_ids"].squeeze()
-        attention_mask = encoding["attention_mask"].squeeze()
+        #input_ids = encoding["input_ids"].squeeze()
+        #attention_mask = encoding["attention_mask"].squeeze()
         label = torch.tensor(self.targets[idx])
 
         return input_ids, attention_mask, label
 
 # Classify the conversation
 class ClassifierNetwork(pl.LightningModule):
-    def __init__(self, gpt2_model, max_conv_length):
+    def __init__(self, gpt2_model):
         super(ClassifierNetwork, self).__init__()
 
         # Freeze GPT-2 weights
@@ -220,29 +149,21 @@ def custom_collate_fn(batch):
 
 
 def main():
-    # Setup input files.
-    trainfilename = 'eredial.json'
-    testfilename = 'test.json'
+    #Input files used 
+    #trainfilename = 'TRAIN_combinedData.txt'
+    #testfilename = 'TEST_combinedData.txt'
 
-    #Setup target files
-    trainTargetFilename = 'E-redial-TRAINING-LABELS.txt'
-    testTargetFilename = 'E-redial-TEST-LABELS.txt'
+    #Target label files used
+    #trainTargetFilename = 'TRAIN_Labels_CombinedData.csv'
+    #testTargetFilename = 'TEST_Labels_CombinedData.csv'
 
-    #GEt input data from file
-    trainInput = get_input_data(trainfilename)  #, trainRoles = get_input_data(trainfilename)
-    testInput = get_input_data(testfilename)  #, testRoles = get_input_data(testfilename)
-
-    #get maximum conversation Lengths
-    max_conv_length = max(len(conv) for conv in trainInput + testInput)
-    
-
-    #Pad conversations and roles so they have the same length
-    trainInput = pad_conversations(trainInput)
-    testInput = pad_conversations(testInput)
+    #Get input data from file, this includes the conversation, and its associated quality factors
+    trainidList,trainseekerConv,trainrecommenderConv,trainlength,trainreadability,trainwordImp,trainrepetition,trainsubjectivity,trainpolarity,traingrammar,trainfeatureAppearance,trainpreservedOrder = readInData('training')
+    testidList,testseekerConv,testrecommenderConv,testlength,testreadability,testwordImp,testrepetition,testsubjectivity,testpolarity,testgrammar,testfeatureAppearance,testpreservedOrder = readInData('test')
 
     #Get label data for train / test
-    trainLabels = get_target_data(trainTargetFilename)
-    testLabels = get_target_data(testTargetFilename)
+    trainLabels = readInLabels('training')
+    testLabels = readInLabels('test')
 
     #Embed the data
     train_dataset = encoderNetwork(trainInput, trainLabels, tokenizer_gpt2)
@@ -255,7 +176,7 @@ def main():
     logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="gpt2")
 
     #Make classifier network
-    classifier_network = ClassifierNetwork(model_gpt2, max_conv_length)
+    classifier_network = ClassifierNetwork(model_gpt2)
 
     trainer = pl.Trainer(
         logger=logger,
