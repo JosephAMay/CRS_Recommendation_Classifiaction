@@ -15,6 +15,17 @@ from sklearn.preprocessing import LabelEncoder
 from torch.nn.utils.rnn import pad_sequence
 
 
+# Test data 756 long. 756 / 18 == 42 even runs through data.
+TRAIN_BATCH_SIZE = 4
+TEST_BATCH_SIZE = 5
+NUM_EPOCHS = 60
+
+# Load pre-trained GPT-2 model and tokenizer
+gpt2Model = GPT2Model.from_pretrained('gpt2')
+gpt2Tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+gpt2Tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+
 # Check system requirements
 if torch.cuda.is_available():
     print(torch.cuda.get_device_name())
@@ -95,54 +106,105 @@ def readInLabels(choice):
 
     return labels
 
+# Function to pad conversations to a common length
+def padConversations(conversations):
+    # Get maxlength conversation, and pad each conversation so they're the same length
+    max_length = max(len(conv) for conv in conversations)
+    padded_conversations = []
+    for conv in conversations:
+        padded_conv = conv + [' '] * (max_length - len(conv))
+        padded_conversations.append(padded_conv)
+    return padded_conversations
+    
+# Pad sequences within each batch got some IO errors on data size so this fixes that
+def customCollate(batch):
+    input_ids, attention_masks, labels = zip(*batch)
 
-class GPT2Encoder(nn.Module):
-    def __init__(self, gpt2_model):
-        super(GPT2Encoder, self).__init__()
-        self.gpt2_model = gpt2_model
+    # Determine the maximum length in the batch
+    max_len = max(len(ids) for ids in input_ids)
 
-    def forward(self, conversation):
-        # Tokenize and encode conversation using GPT-2
-        encoded_conversation = self.gpt2_model(conversation)['last_hidden_state'][:, -1, :]
-        return encoded_conversation
+    # Pad or truncate sequences to the maximum length using the padding token (0 in this case)
+    padded_input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
+    padded_attention_masks = pad_sequence(attention_masks, batch_first=True, padding_value=0)
 
+    return padded_input_ids, padded_attention_masks, torch.tensor(labels)
+    
 
-class GPT2Classifier(pl.LightningModule):
-    def __init__(self, gpt2_encoder, classifier_input_size):
-        super(GPT2Classifier, self).__init__()
-        self.gpt2_encoder = gpt2_encoder
-        self.classifier_input_size = classifier_input_size
+class encoderNetwork(dataset):
+    def __init__(self, tokenizer, preserved_order, length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance, labels):
+        self.tokenizer = tokenizer
+        self.conversations = preserved_order
+        self.length = length
+        self.readability = readability
+        self.wordImp = wordImp
+        self.repetition = repetition
+        self.polarity = polarity
+        self.subjectivity = subjectivity
+        self.featApp = featureAppearance
+        self.grammar = grammar
+        self.labels = labels
 
-        # Classifier network
-        self.classifier = nn.Sequential(
-            nn.Linear(self.gpt2_encoder.gpt2_model.config.hidden_size + self.classifier_input_size, 256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 3),  # Output: Bad, Okay, Good
-            nn.Softmax(dim=1)   # Softmax for multi-class classification
-        )
+    def __len__(self):
+        return len(self.conversations)
 
+    def __getitem__(self, idx):
+
+        text = " ".join(self.conversations[idx])
+        encoding = self.tokenizer(text, padding=True, truncation=True, return_tensors="pt")
+
+        input_ids = encoding["input_ids"]
+        attention_mask = encoding["attention_mask"]
+        
+        lenScore = torch.tensor(self.length[idx])
+        readScore = torch.tensor(self.readability[idx])
+        wordScore = torch.tensor(self.wordImp[idx])
+        repScore = torch.tensor(self.repetition[idx])
+        polScore =  torch.tensor(self.polarity[idx])
+        subScore =  torch.tensor(self.subjectivity[idx])
+        featScore =  torch.tensor(self.featApp[idx])
+        gramScore= torch.tensor(self.grammar[idx])
+
+        label = torch.tensor(self.targets[idx])
+
+        return input_ids, attention_mask, lenScore,readScore,wordScore,repScore,polScore,subScore,featScore,gramScore, label
+
+# Classify the conversation
+class ClassifierNetwork(pl.LightningModule):
+    def __init__(self, gpt2_model, max_conv_length):
+        super(ClassifierNetwork, self).__init__()
+
+        # Freeze GPT-2 weights
+        for param in gpt2_model.parameters():
+            param.requires_grad = False
+
+        self.gpt2 = gpt2_model
+        self.fc3 = nn.Linear(256+8, 3)
         self.loss_fn = nn.CrossEntropyLoss()
+        self.accuracy = torchmetrics.classification.Accuracy(task='multiclass')
 
-    def forward(self, conversation, additional_features):
-        # Encode conversation using GPT2
-        encoded_conversation = self.gpt2_encoder(conversation)
+    def forward(self, input_ids, attention_mask, lenScore,readScore,wordScore,repScore,polScore,subScore,featScore,gramScore):
+        outputs = self.gpt2(input_ids, attention_mask=attention_mask)
+        last_hidden_states = outputs['last_hidden_state']  # Use last hidden states instead of pooler_output
 
-        # Concatenate GPT-2 encoded conversation with additional features
-        concatenated_input = torch.cat([encoded_conversation, additional_features], dim=1)
+        # Take the mean of last hidden states along the sequence dimension
+        pooled_output = torch.mean(last_hidden_states, dim=1)
+        scores = torch.cat((lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore), dim=1)
+        combined_output = torch.cat((pooled_output, scores), dim=1)
+        # Apply linear layers
+        x = F.relu(self.fc1(pooled_output))
+        x = F.relu(self.fc2(x))
+        logits = self.fc3(x)
 
-        # Forward pass through the classifier network
-        output = self.classifier(concatenated_input)
-        return output
+        return logits
 
-    def training_step(self, batch, batch_idx):
-        conversation, additional_features, labels = batch
-        output = self(conversation, additional_features)
-        loss = self.loss_fn(output, labels)
+   def training_step(self, batch, batch_idx):
+        input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore, labels = batch
+        logits = self(input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore)
+        loss = self.loss_fn(logits, labels)
 
         # Calculate accuracy
-        preds = torch.argmax(output, dim=1)
-        acc = torch.sum(preds == labels).float() / len(labels)
+        preds = torch.argmax(logits, dim=1)
+        acc = self.accuracy(preds, labels)
 
         # Log metrics
         self.log('train_acc', acc, on_step=False, on_epoch=True)
@@ -151,13 +213,13 @@ class GPT2Classifier(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        conversation, additional_features, labels = batch
-        output = self(conversation, additional_features)
-        loss = self.loss_fn(output, labels)
+        input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore, labels = batch
+        logits = self(input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore)
+        loss = self.loss_fn(logits, labels)
 
         # Calculate accuracy
-        preds = torch.argmax(output, dim=1)
-        acc = torch.sum(preds == labels).float() / len(labels)
+        preds = torch.argmax(logits, dim=1)
+        acc = self.accuracy(preds, labels)
 
         # Log metrics
         self.log('val_acc', acc, on_step=False, on_epoch=True)
@@ -166,44 +228,8 @@ class GPT2Classifier(pl.LightningModule):
         return {"val_loss": loss, "val_acc": acc}
 
     def configure_optimizers(self):
-        return optim.Adam(self.parameters(), lr=0.001)
+        return torch.optim.AdamW(self.parameters(), lr=2e-5)
 
-class CustomDataset(Dataset):
-    def __init__(self, tokenizer, gpt2_encoder, preserved_order, additional_features, labels):
-        self.tokenizer = tokenizer
-        self.gpt2_encoder = gpt2_encoder
-        self.preserved_order = preserved_order
-        self.additional_features = additional_features
-        self.labels = labels
-
-    def __len__(self):
-        return len(self.labels)
-
-    def __getitem__(self, idx):
-        conversation = self.preserved_order[idx]
-
-        # Tokenize the conversation using GPT2 tokenizer and convert to tensor
-        tokens = self.tokenizer(conversation, return_tensors='pt', truncation=True, padding=True)
-        input_ids = tokens['input_ids']
-
-        # Encode conversation using GPT2
-        encoded_conversation = self.gpt2_encoder(input_ids)  # Pass input_ids instead of conversation
-
-        additional_feature = self.additional_features[idx]
-        label = self.labels[idx]
-
-        return encoded_conversation, additional_feature, label
-
-    @staticmethod
-    def collate_fn(batch):
-        conversations, additional_features, labels = zip(*batch)
-
-        # Pad sequences to the length of the longest sequence in the batch
-        conversations_padded = pad_sequence(conversations, batch_first=True)
-        additional_features_tensor = torch.stack(additional_features)
-        labels_tensor = torch.tensor(labels, dtype=torch.long)
-
-        return conversations_padded, additional_features_tensor, labels_tensor
 
 
 def main():
@@ -216,64 +242,34 @@ def main():
     #testTargetFilename = 'TEST_Labels_CombinedData.csv'
 
     #Get input data from file, this includes the conversation, and its associated quality factors
-    trainidList,trainseekerConv,trainrecommenderConv,trainlength,trainreadability,trainwordImp,trainrepetition,trainsubjectivity,trainpolarity,traingrammar,trainfeatureAppearance,trainpreservedOrder = readInData('training')
-    testidList,testseekerConv,testrecommenderConv,testlength,testreadability,testwordImp,testrepetition,testsubjectivity,testpolarity,testgrammar,testfeatureAppearance,testpreservedOrder = readInData('test')
+        trainidList,trainseekerConv,trainrecommenderConv,trainlength,trainreadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance,trainpreservedOrder = readInData('training')
+    testidList,testSeekerConv,testRecommenderConv,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testpreservedOrder = readInData('test')
 
     #Get label data for train / test
     trainLabels = readInLabels('training')
     testLabels = readInLabels('test')
 
-    # Example usage
-    tokenizer_gpt2 = GPT2Tokenizer.from_pretrained('gpt2')
-    tokenizer_gpt2.add_special_tokens({'pad_token': '[PAD]'})
-    gpt2_model = GPT2Model.from_pretrained('gpt2')
-    gpt2_encoder = GPT2Encoder(gpt2_model)
+    #Pad input data so all conversations are the same length
+    trainInput = padConversation(trainpreservedOrder)
+    testInput = padConversation(testpreservedOrder)
 
-    # Assuming trainLabels and testLabels are torch tensors, and trainpreservedOrder and testpreservedOrder are lists of lists
-    train_preserved_order, test_preserved_order = trainpreservedOrder, testpreservedOrder
-    train_additional_features = torch.stack([
-        torch.tensor(trainlength),
-        torch.tensor(trainreadability),
-        torch.tensor(trainwordImp),
-        torch.tensor(trainrepetition),
-        torch.tensor(trainsubjectivity),
-        torch.tensor(trainpolarity),
-        torch.tensor(traingrammar),
-        torch.tensor(trainfeatureAppearance)
-    ], dim=1)
+    trainDataset = encoderNetwork(gpt2Tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLlabels) 
+    testDataset = encoderNetwork(gpt2Tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
-    test_additional_features = torch.stack([
-        torch.tensor(testlength),
-        torch.tensor(testreadability),
-        torch.tensor(testwordImp),
-        torch.tensor(testrepetition),
-        torch.tensor(testsubjectivity),
-        torch.tensor(testpolarity),
-        torch.tensor(testgrammar),
-        torch.tensor(testfeatureAppearance)
-    ], dim=1)
+    trainDataloader = DataLoader(trainDataset, batch_size=TRAIN_BATCH_SIZE, shuffle=True, collate_fn=customCollate)
+    testDataloader = DataLoader(testDataset, batch_size=TEST_BATCH_SIZE, shuffle=False, collate_fn=customCollate)
 
-    label_encoder = LabelEncoder()
-    train_labels = torch.tensor(label_encoder.fit_transform(trainLabels), dtype=torch.long)
-    test_labels = torch.tensor(label_encoder.transform(testLabels), dtype=torch.long)
-
-    train_dataset = CustomDataset(tokenizer_gpt2, gpt2_encoder, train_preserved_order, train_additional_features, train_labels)
-    test_dataset = CustomDataset(tokenizer_gpt2, gpt2_encoder, test_preserved_order, test_additional_features, test_labels)
-
-    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=train_dataset.collate_fn)
-    test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False, collate_fn=test_dataset.collate_fn)
-
-
-    # Initialize the encoder classifier model
-    gpt2_classifier = GPT2Classifier(gpt2_encoder, classifier_input_size=train_additional_features.size(1))
-
-    # Initialize the CSV Logger
+    #Initialize the CSV Logger for stat tracking
     logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="gpt2")
 
-    # Initialize the trainer
+    #encoder classifier model
+    classifier = classifierNetwork(gp2Model)
+
+    
+    #Initialize the trainer
     trainer = pl.Trainer(
         logger=logger,
-        max_epochs=5,
+        max_epochs=NUM_EPOCHS,
         enable_progress_bar=True,
         log_every_n_steps=0,
         enable_checkpointing=True,
@@ -281,7 +277,7 @@ def main():
     )
 
     # Train the model
-    trainer.fit(gpt2_classifier, train_dataloader, test_dataloader)
+    trainer.fit(classifier, trainDataloader, testDataloader)
 
     #Read in metrics from metrics file. Output metrics to stdout
     results = pd.read_csv(logger.log_dir+"/metrics.csv")
@@ -303,4 +299,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -9,7 +9,7 @@ def main():
             keepGoing =False
     idList,seekerConv,recommenderConv,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,preservedOrder = readInData(choice)
     scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance,seekerConv,recommenderConv,choice)      
-    #showHistograms(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance,seekerConv,recommenderConv)
+    #showHistograms(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv)
         
 
 #Open up the file, store the data with each column in its own array.
@@ -94,7 +94,7 @@ def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,
     for id,lenVal,readVal,wordVal,repVal,subVal,gramVal,feaVal in zip(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance):
         #Very good conversation: Label == 1
         if (lenVal >=.3) and (readVal >=7) and (wordVal >=7) and (repVal <=20) and (subVal >=.45) and (gramVal <=.04) and (feaVal >=.82):
-            outFile.write(f'{id},{1}\n')
+            outFile.write(f'{id},{0}\n')
         #Average Conversation: Label == 2
         elif (lenVal >=.25) and (readVal >5) and (wordVal >4) and (repVal <=25) and (subVal >=.30) and (gramVal <=.05) and (feaVal>=.8):
             outFile.write(f'{id},{2}\n')
@@ -107,7 +107,7 @@ def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,
 
 
 #Make some histograms of the data for quick visualization of the spread of the data. 
-def showHistograms(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance,seekerConv,recommenderConv):
+def showHistograms(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv):
     plt.hist(length, bins = 10, color='blue', edgecolor='black')
     plt.xlabel('Value')
     plt.title("Length")
