@@ -16,9 +16,9 @@ def main():
 #Data in the file is delimited by |= 
 def readInData(choice):
     if choice == 1 or choice =='training':
-        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\TRAIN_combinedData.txt'
+        filename= 'TRAIN_combinedData.txt'
     else:
-        filename= 'C:\\Users\\josep\\OneDrive\\Desktop\\ThesisWork\\CRS_Recommendation_Classifiaction\\TEST_combinedData.txt'
+        filename= 'TEST_combinedData.txt'
     idList = []
     seekerConv = []
     tempSeekerConv = []
@@ -240,6 +240,5 @@ def showHistograms(idList,length,readability,wordImp,repetition,subjectivity,gra
             
             
 
-
-
-main()
+if __name__ == "__main__":
+    main()
