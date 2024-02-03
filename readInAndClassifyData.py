@@ -94,13 +94,13 @@ def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,
     for id,lenVal,readVal,wordVal,repVal,subVal,gramVal,feaVal in zip(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance):
         #Very good conversation: Label == 0
         if (lenVal >=.3) and (readVal >=7) and (wordVal >=7) and (repVal <=20) and (subVal >=.45) and (gramVal <=.04) and (feaVal >=.82):
-            outFile.write(f'{id},{0}\n')
+            outFile.write(f'{id},0\n')
         #Average Conversation: Label == 1
         elif (lenVal >=.25) and (readVal >5) and (wordVal >4) and (repVal <=25) and (subVal >=.30) and (gramVal <=.05) and (feaVal>=.8):
-            outFile.write(f'{id},{1}\n')
+            outFile.write(f'{id},1\n')
         #Bad conversation: Label == 2
         else:
-            outFile.write(f'{id},{2}\n')
+            outFile.write(f'{id},2\n')
     
     outFile.close()
 
