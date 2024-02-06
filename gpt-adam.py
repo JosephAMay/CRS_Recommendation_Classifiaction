@@ -15,8 +15,10 @@ from sklearn.preprocessing import LabelEncoder
 from torch.nn.utils.rnn import pad_sequence
 
 
-# Test data 756 long. 756 / 18 == 42 even runs through data.
-BATCH_SIZE = 25
+# Train data 1557 long. 1557 / 173 == 9 even runs through data.
+#Test data 249 long. 249 / 83 = 3 even runs through data.
+TRAIN_BATCH_SIZE = 173
+TEST_BATCH_SIZE = 83
 NUM_CLASSES=3
 NUM_EPOCHS = 100
 
@@ -353,8 +355,8 @@ def main():
     trainDataset = encoderNetwork(gpt2Tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLabels) 
     testDataset = encoderNetwork(gpt2Tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
-    trainDataloader = DataLoader(trainDataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=customCollate,num_workers=8)
-    testDataloader = DataLoader(testDataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=customCollate,num_workers=8)
+    trainDataloader = DataLoader(trainDataset, batch_size=TRAIN_BATCH_SIZE, shuffle=True, collate_fn=customCollate,num_workers=8)
+    testDataloader = DataLoader(testDataset, batch_size=TEST_BATCH_SIZE, shuffle=False, collate_fn=customCollate,num_workers=8)
 
     #Initialize the CSV Logger for stat tracking
     logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="gpt2")
