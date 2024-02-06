@@ -6,7 +6,7 @@ import torchmetrics
 import torchvision
 import torch.nn as nn
 import torch.optim as optim
-from transformers import GPT2Tokenizer, GPT2Model
+from transformers import T5Tokenizer, T5ForConditionalGeneration
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
@@ -20,10 +20,10 @@ BATCH_SIZE = 4
 NUM_CLASSES=3
 NUM_EPOCHS = 60
 
-# Load pre-trained GPT-2 model and tokenizer
-gpt2Model = GPT2Model.from_pretrained('gpt2')
-gpt2Tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-gpt2Tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+# Load pre-trainedT5model and tokenizer
+model = T5ForConditionalGeneration.from_pretrained('t5-base')
+tokenizer = T5Tokenizer.from_pretrained('t5-base')
+tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 
 
 # Check system requirements
@@ -127,6 +127,11 @@ def customCollate(batch):
     input_ids = pad_sequence([F.pad(ids, pad=(0, max_length - ids.size(1)), value=0) for ids in input_ids], batch_first=True)
     attention_masks = pad_sequence([F.pad(masks, pad=(0, max_length - masks.size(1)), value=0) for masks in attention_masks], batch_first=True)
 
+    #Paddings adds a singleton dimension that causes errors down the line. Squeeze dimension out so that IDS and masks are 
+    #[batchSize,sequenceLength] rather than [batchSize,1,sequenceLength]
+    
+    input_ids = input_ids.squeeze(dim=1)
+    attention_masks = attention_masks.squeeze(dim=1)
     
     length = torch.tensor(length, dtype=torch.float32).view(-1, 1)
     readability = torch.tensor(readability, dtype=torch.float32).view(-1, 1)
@@ -179,26 +184,26 @@ class encoderNetwork(Dataset):
         featScore =  torch.tensor(self.featApp[idx])
         gramScore= torch.tensor(self.grammar[idx])
 
-        label = torch.tensor(int(self.labels[idx]))
+        label = torch.tensor(int(self.labels[idx]),dtype=torch.long)
 
         return input_ids, attention_mask, lenScore,readScore,wordScore,repScore,polScore,subScore,featScore,gramScore, label
 
 # Classify the conversation
 class ClassifierNetwork(pl.LightningModule):
-    def __init__(self, gpt2_model, num_classes=NUM_CLASSES):
+    def __init__(self, t5_model, num_classes=NUM_CLASSES):
         super(ClassifierNetwork, self).__init__()
 
-        # Freeze GPT-2 weights
-        for param in gpt2_model.parameters():
+        # Freeze t5 weights
+        for param in t5_model.parameters():
             param.requires_grad = False
 
-        self.gpt2 = gpt2_model
+        self.t5 = t5_model
 
         #Projection layer to be used to add residual connections.
         self.projection = nn.Linear(NUM_CLASSES,256)
         self.residShrink = nn.Linear(256, NUM_CLASSES)
         #Linear Layers. Stacked into sets of 3
-        self.fc1 = nn.Linear(776, 256)
+        self.fc1 = nn.Linear(1536, 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, NUM_CLASSES)
         #Middle layer, projected down, then back up
@@ -215,10 +220,9 @@ class ClassifierNetwork(pl.LightningModule):
 
 
     def forward(self, input_ids, attention_mask, lenScore,readScore,wordScore,repScore,polScore,subScore,featScore,gramScore):
-        #input_ids = input_ids[0]
-        #attention_mask = attention_mask[0]
-        outputs = self.gpt2(input_ids, attention_mask=attention_mask)
-        last_hidden_states = outputs['last_hidden_state']  # Use last hidden states instead of pooler_output
+        
+        outputs = self.t5(input_ids=input_ids,attention_mask=attention_mask,decoder_input_ids=input_ids)
+        last_hidden_states = outputs['encoder_last_hidden_state']  # Use last hidden states instead of pooler_output
         #print("Shapes:", lenScore.shape, readScore.shape, wordScore.shape, repScore.shape, polScore.shape, subScore.shape, featScore.shape, gramScore.shape)
 
         # Take the mean of last hidden states along the sequence dimension
@@ -226,37 +230,16 @@ class ClassifierNetwork(pl.LightningModule):
         
         
         scores = torch.cat((lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore), dim=1)
-        #scores = scores.view(1, -1)  # Reshape to have 1 row and as many columns as needed to combine with encoded CONV
+        #print(f'Scores shape is = {scores.shape}\tPooledOutput=={pooled_output.shape}\tPOOL Output size(1)=={pooled_output.size(1)}\tScires suze 1 = {scores.size(1)}')
+        repeated_scores = scores.repeat(1, pooled_output.size(1)//scores.size(1))
+        #print(f'Repeated Scores shape is = {repeated_scores.shape}\tPooledOutput=={pooled_output.shape}')
+        #print('repeated scores is ', repeated_scores)
+        # Combine pooled output and repeated scores along a new dimension
+        combined_outputs = torch.cat((pooled_output, repeated_scores), dim=1)
         
-        #print("Pooled Output Shape:", pooled_output.shape)
-        #print("Scores Shape:", scores.shape)
-        #print(scores)
-        #print("Pooled Output Shape:", pooled_output.shape)
         
+        #print(f'Combined outputs shape={combined_outputs.shape}')
         
-        
-        combined_outputs = []
-
-        # Iterate over each instance in the batch
-        for i in range(pooled_output.size(0)):
-            # Select the pooled output and scores for the current instance
-            current_pooled_output = pooled_output[i, :, :]
-            current_scores = scores[i, :]
-        
-            # Repeat the scores to match the sequence length
-            repeated_scores = current_scores.repeat(current_pooled_output.size(0), 1)
-        
-            # Concatenate pooled output with repeated scores along dimension 1
-            combined_output = torch.cat((current_pooled_output, repeated_scores), dim=1)
-        
-            # Append to the list
-            combined_outputs.append(combined_output)
-        
-        # Concatenate along dimension 0 to maintain batch integrity
-        combined_outputs = torch.stack(combined_outputs, dim=0)
-
-        #print("Combined Output Shape:", combined_outputs.shape)
-        #print("Scores Shape:", scores.shape)
         
         
         #linear layers with residual connections
@@ -280,7 +263,6 @@ class ClassifierNetwork(pl.LightningModule):
         
         logits = self.final(x)
 
-        logits = torch.mean(logits, dim=1)
 
         return logits
 
@@ -290,8 +272,10 @@ class ClassifierNetwork(pl.LightningModule):
         #print('Logits in training step:',logits.shape)
         loss = self.loss_fn(logits, labels)
 
+        
         # Calculate accuracy
         preds = torch.argmax(logits, dim=1)
+        #print('TRAINING\nPreds ==',preds, '\nPredsShape=',preds.shape)
         #print('Line 260, predictions are:', torch.unique(preds))
         acc = self.accuracy(preds, labels)
 
@@ -309,6 +293,7 @@ class ClassifierNetwork(pl.LightningModule):
 
         # Calculate accuracy
         preds = torch.argmax(logits, dim=1)
+        #print('VALIDATION\nPreds ==',preds, '\nPredsShape=',preds.shape)
         #print('Line 275, predictions are:', torch.unique(preds))
         acc = self.accuracy(preds, labels)
 
@@ -350,17 +335,17 @@ def main():
     
     
     
-    trainDataset = encoderNetwork(gpt2Tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLabels) 
-    testDataset = encoderNetwork(gpt2Tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
+    trainDataset = encoderNetwork(tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLabels) 
+    testDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
     trainDataloader = DataLoader(trainDataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=customCollate)
     testDataloader = DataLoader(testDataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=customCollate)
 
     #Initialize the CSV Logger for stat tracking
-    logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="gpt2")
+    logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="T5")
 
     #encoder classifier model
-    classifier = ClassifierNetwork(gpt2Model)
+    classifier = ClassifierNetwork(model)
 
     
     #Initialize the trainer
@@ -396,3 +381,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
