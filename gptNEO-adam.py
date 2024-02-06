@@ -16,9 +16,9 @@ from torch.nn.utils.rnn import pad_sequence
 
 
 # Test data 756 long. 756 / 18 == 42 even runs through data.
-BATCH_SIZE = 4
+BATCH_SIZE = 25
 NUM_CLASSES=3
-NUM_EPOCHS = 60
+NUM_EPOCHS = 100
 
 # Load pre-trained GPT-2 model and tokenizer
 gptneoModel = GPTNeoModel.from_pretrained('EleutherAI/gpt-neo-125m')  # Update this line
@@ -338,8 +338,8 @@ def main():
     trainDataset = encoderNetwork(tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLabels) 
     testDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
-    trainDataloader = DataLoader(trainDataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=customCollate)
-    testDataloader = DataLoader(testDataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=customCollate)
+    trainDataloader = DataLoader(trainDataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=customCollate,num_workers=8)
+    testDataloader = DataLoader(testDataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=customCollate,num_workers=8)
 
     #Initialize the CSV Logger for stat tracking
     logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="gptNEO")
