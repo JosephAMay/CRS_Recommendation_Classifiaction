@@ -7,8 +7,12 @@ def main():
         choice = int(input("Enter 1 to read in training data, 2 to process test data: "))
         if choice ==1 or choice ==2:
             keepGoing =False
+
     idList,seekerConv,recommenderConv,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,preservedOrder = readInData(choice)
-    scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance,seekerConv,recommenderConv,choice)      
+    
+    #Uncomment as necassary
+    #normalizeWriteData(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv,preservedOrder,choice)
+    #scoreConv(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv,choice)      
     #showHistograms(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv)
         
 
@@ -82,7 +86,7 @@ def readInLabels(choice):
     return labels
 
 #Score conversation based on breakpoints observed in data / having desirable conditions
-def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance,seekerConv,recommenderConv,choice):
+def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,polarity, grammar,featureAppearance,seekerConv,recommenderConv,choice):
     if choice == 1:
         filename= 'TRAIN_Labels_combinedData.csv'
     else:
@@ -91,12 +95,12 @@ def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,
 
     outFile = open(filename, 'w', encoding ='utf-8')
     #Loop through data scores, based on score, assign a label
-    for id,lenVal,readVal,wordVal,repVal,subVal,gramVal,feaVal in zip(idList,length,readability,wordImp,repetition,subjectivity,grammar,featureAppearance):
+    for id,lenVal,readVal,wordVal,repVal,subVal,polVal,gramVal,feaVal in zip(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance):
         #Very good conversation: Label == 0
-        if (lenVal >=.3) and (readVal >=7) and (wordVal >=7) and (repVal <=20) and (subVal >=.45) and (gramVal <=.04) and (feaVal >=.82):
+        if (lenVal >=.3) and (readVal >=7) and (wordVal >=7) and (repVal <=20) and (subVal >=.45) and (polVal >=.2 and polVal <=.75) and (gramVal <=.04) and (feaVal >=.82):
             outFile.write(f'{id},0\n')
         #Average Conversation: Label == 1
-        elif (lenVal >=.25) and (readVal >5) and (wordVal >4) and (repVal <=25) and (subVal >=.30) and (gramVal <=.05) and (feaVal>=.8):
+        elif (lenVal >=.25) and (readVal >5) and (wordVal >4) and (repVal <=25) and (subVal >=.30) and (polVal >=.1 and polVal <=.95) (gramVal <=.05) and (feaVal>=.8):
             outFile.write(f'{id},1\n')
         #Bad conversation: Label == 2
         else:
@@ -104,6 +108,47 @@ def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,grammar,
     
     outFile.close()
 
+#Takes in data post Read IN data / quality factors seperated into individual lists.
+#Normalizes each QF, and writes the data to 
+def normalizeWriteData(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv,preservedOrder,choice):
+    if choice == 1:
+        filename= 'Normalized_TRAIN_combinedData.txt'
+    else:
+        filename= 'Normalized_TEST_combinedData.txt'
+
+    #Normalize the values of each quality factor
+    length = normalizeQualityFactor(length)
+    readability = normalizeQualityFactor(readability)
+    wordImp = normalizeQualityFactor(wordImp)
+    repetition = normalizeQualityFactor(repetition)
+    subjectivity = normalizeQualityFactor(subjectivity)
+    polarity = normalizeQualityFactor(polarity)
+    grammar = normalizeQualityFactor(grammar)
+    featureAppearance = normalizeQualityFactor(featureAppearance)
+
+    
+    outFile = open(filename, 'w', encoding ='utf-8')
+    for x, id in enumerate(idList):
+        outFile.write(f'{id}|={recommenderConv[x]}|={seekerConv[x]}|={length[x]}|={readability[x]}|={wordImp[x]}|={repetition[x]}|={subjectivity[x]}|={polarity[x]}|={grammar[x]}|={featureAppearance[x]}|={preservedOrder[x]}\n') 
+
+
+    outFile.close()
+
+
+#Gets the average and stdDev of a quality factor. Then does z score normalization on the quality facotr and returns the normalized list. 
+def normalizeQualityFactor(data):
+
+    average = sum(data)/len(data)
+    stdDev = 0
+    for val in data:
+        stdDev += (val-average)**2 
+
+    stdDev=  (stdDev/len(data))**.5
+
+    for i in range(len(data)):
+        data[i] = (data[i]-average)/stdDev
+
+    return data
 
 
 #Make some histograms of the data for quick visualization of the spread of the data. 
