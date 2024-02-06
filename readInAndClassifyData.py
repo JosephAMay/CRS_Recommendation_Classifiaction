@@ -12,7 +12,7 @@ def main():
     
     #Uncomment as necassary
     #normalizeWriteData(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv,preservedOrder,choice)
-    #scoreConv(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv,choice)      
+    scoreConv(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv,choice)      
     #showHistograms(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance,seekerConv,recommenderConv)
         
 
@@ -97,10 +97,10 @@ def scoreConv(idList,length,readability,wordImp,repetition,subjectivity,polarity
     #Loop through data scores, based on score, assign a label
     for id,lenVal,readVal,wordVal,repVal,subVal,polVal,gramVal,feaVal in zip(idList,length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance):
         #Very good conversation: Label == 0
-        if (lenVal >=.3) and (readVal >=7) and (wordVal >=7) and (repVal <=20) and (subVal >=.45) and (polVal >=.2 and polVal <=.75) and (gramVal <=.04) and (feaVal >=.82):
+        if (lenVal >=.3) and (readVal >=7) and (wordVal >=7) and (repVal <=20) and (subVal >=.45) and (polVal >=.15) and (gramVal <=.04) and (feaVal >=.82): 
             outFile.write(f'{id},0\n')
         #Average Conversation: Label == 1
-        elif (lenVal >=.25) and (readVal >5) and (wordVal >4) and (repVal <=25) and (subVal >=.30) and (polVal >=.1 and polVal <=.95) (gramVal <=.05) and (feaVal>=.8):
+        elif (lenVal >=.25) and (readVal >5) and (wordVal >4) and (repVal <=25) and (subVal >=.30) and (polVal >=.1) and (gramVal <=.05) and (feaVal>=.8): 
             outFile.write(f'{id},1\n')
         #Bad conversation: Label == 2
         else:
