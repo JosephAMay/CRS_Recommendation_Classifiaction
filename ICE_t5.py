@@ -6,15 +6,14 @@ import torchmetrics
 import torchvision
 import torch.nn as nn
 import torch.optim as optim
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from transformers import GPT2Tokenizer, GPT2Model
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 from torch.nn.utils.rnn import pad_sequence
-import sys
-import random
+import pickle
 
 # Train data 1557 long. 1557 / 9 == 173  even runs through data.
 #Test data 249 long. 249 / 3 == 83 even runs through data.
@@ -23,9 +22,9 @@ TEST_BATCH_SIZE = 3
 NUM_CLASSES=3
 NUM_EPOCHS = 80
 
-# Load pre-trained GPT-2 model and tokenizer
-model = GPT2Model.from_pretrained('gpt2')
-tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+# Load pre-trainedT5model and tokenizer
+model = T5ForConditionalGeneration.from_pretrained('t5-base')
+tokenizer = T5Tokenizer.from_pretrained('t5-base')
 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 
 
@@ -44,9 +43,9 @@ else:
 #Data in the file is delimited by |= 
 def readInData(choice):
     if choice == 1 or choice =='training':
-        filename= 'TRAIN_combinedData.txt'
+        filename= 'Normalized_TRAIN_combinedData.txt'
     else:
-        filename= 'TEST_combinedData.txt'
+        filename= 'Normalized_TEST_combinedData.txt'
     idList = []
     seekerConv = []
     tempSeekerConv = []
@@ -119,37 +118,7 @@ def padConversation(conversations):
         padded_conversations.append(padded_conv)
     return padded_conversations
     
-# Pad sequences within each batch got some IO errors on data size so this fixes that
-def customCollate(batch):
-    input_ids, attention_masks,length,readability,wordImp,repetition,subjectivity,\
-        polarity,grammar,featureAppearance, labels = zip(*batch)
-
-    #Find biggerst conversation in the batch
-    max_length = max(len(ids[0]) for ids in input_ids)
-    
-    #Pad each conversation inputids and attentionMasks to max_length so they all have the same dimensions
-    input_ids = pad_sequence([F.pad(ids, pad=(0, max_length - ids.size(1)), value=0) for ids in input_ids], batch_first=True)
-    attention_masks = pad_sequence([F.pad(masks, pad=(0, max_length - masks.size(1)), value=0) for masks in attention_masks], batch_first=True)
-
-    #Paddings adds a singleton dimension that causes errors down the line. Squeeze dimension out so that IDS and masks are 
-    #[batchSize,sequenceLength] rather than [batchSize,1,sequenceLength]
-    input_ids = input_ids.squeeze(dim=1)
-    attention_masks = attention_masks.squeeze(dim=1)
-
-    #reshape each quality factor so it is a tensor with 1 dimension    
-    length = torch.tensor(length, dtype=torch.float32).view(-1, 1)
-    readability = torch.tensor(readability, dtype=torch.float32).view(-1, 1)
-    wordImp = torch.tensor(wordImp, dtype=torch.float32).view(-1, 1)
-    repetition = torch.tensor(repetition, dtype=torch.float32).view(-1, 1)
-    subjectivity = torch.tensor(subjectivity, dtype=torch.float32).view(-1, 1)
-    polarity = torch.tensor(polarity, dtype=torch.float32).view(-1, 1)
-    grammar = torch.tensor(grammar, dtype=torch.float32).view(-1, 1)
-    featureAppearance = torch.tensor(featureAppearance, dtype=torch.float32).view(-1, 1)
-    labels = torch.tensor(labels,dtype=torch.long)
-
-    return input_ids,attention_masks,length,readability,wordImp,\
-            repetition,subjectivity,polarity,grammar,featureAppearance, labels
-  
+ 
 class encoderNetwork(Dataset):
     def __init__(self, tokenizer, preserved_order, length,readability,wordImp,repetition,subjectivity,polarity,grammar,featureAppearance, labels):
         self.tokenizer = tokenizer
@@ -175,29 +144,43 @@ class encoderNetwork(Dataset):
         input_ids = encoding["input_ids"]
         attention_mask = encoding["attention_mask"]
         
-        lenScore = torch.tensor(self.length[idx])
-        readScore = torch.tensor(self.readability[idx])
-        wordScore = torch.tensor(self.wordImp[idx])
-        repScore = torch.tensor(self.repetition[idx])
-        polScore =  torch.tensor(self.polarity[idx])
-        subScore =  torch.tensor(self.subjectivity[idx])
-        featScore =  torch.tensor(self.featApp[idx])
-        gramScore= torch.tensor(self.grammar[idx])
-
-        label = torch.tensor(int(self.labels[idx]))
-
+        input_ids = encoding["input_ids"].clone().detach()
+        attention_mask = encoding["attention_mask"].clone().detach()
+        
+        lenScore = torch.tensor(self.length[idx]).view(-1, 1).clone().detach()
+        readScore = torch.tensor(self.readability[idx]).view(-1, 1).clone().detach()
+        wordScore = torch.tensor(self.wordImp[idx]).view(-1, 1).clone().detach()
+        repScore = torch.tensor(self.repetition[idx]).view(-1, 1).clone().detach()
+        polScore =  torch.tensor(self.polarity[idx]).view(-1, 1).clone().detach()
+        subScore =  torch.tensor(self.subjectivity[idx]).view(-1, 1).clone().detach()
+        featScore =  torch.tensor(self.featApp[idx]).view(-1, 1).clone().detach()
+        gramScore= torch.tensor(self.grammar[idx]).view(-1, 1).clone().detach()
+        label = torch.tensor([int(self.labels[idx])], dtype=torch.long).clone().detach()
         return input_ids, attention_mask, lenScore,readScore,wordScore,repScore,polScore,subScore,featScore,gramScore, label
+
+    def __setitem__(self, idx,value):
+        input_ids, attention_mask, length, readability, wordImp, repetition, subjectivity, polarity, grammar, featureAppearance, labels = value
+        # Update the attributes at the given index with the new value
+        self.length[idx] = length
+        self.readability[idx] = readability
+        self.wordImp[idx] = wordImp
+        self.repetition[idx] = repetition
+        self.subjectivity[idx] = subjectivity
+        self.polarity[idx] = polarity
+        self.grammar[idx] = grammar
+        self.featApp[idx] = featureAppearance
+        self.labels[idx] = labels
 
 # Classify the conversation
 class ClassifierNetwork(pl.LightningModule):
     def __init__(self, model, num_classes=NUM_CLASSES):
         super(ClassifierNetwork, self).__init__()
 
-        # Freeze GPT-2 weights
+        # Freeze t5 weights
         for param in model.parameters():
             param.requires_grad = False
 
-        self.gpt2 = model
+        self.t5 = model
 
         #Projection layer to be used to add residual connections.
         self.projection = nn.Linear(NUM_CLASSES,256)
@@ -220,9 +203,10 @@ class ClassifierNetwork(pl.LightningModule):
 
 
     def forward(self, input_ids, attention_mask, lenScore,readScore,wordScore,repScore,polScore,subScore,featScore,gramScore):
-        outputs = self.gpt2(input_ids, attention_mask=attention_mask)
-        last_hidden_states = outputs['last_hidden_state']  # Use last hidden states instead of pooler_output
-
+        
+        outputs = self.t5(input_ids=input_ids,attention_mask=attention_mask,decoder_input_ids=input_ids)
+        last_hidden_states = outputs['encoder_last_hidden_state']  # Use last hidden states instead of pooler_output
+        
         # Take the mean of last hidden states along the sequence dimension
         pooled_output = torch.mean(last_hidden_states, dim=1)
         
@@ -231,6 +215,7 @@ class ClassifierNetwork(pl.LightningModule):
         repeated_scores = scores.repeat(1, pooled_output.size(1)//scores.size(1))
         # Combine pooled output and repeated scores along a new dimension
         combined_outputs = torch.cat((pooled_output, repeated_scores), dim=1)
+        
         
         #linear layers with residual connections
         x = F.relu(self.fc1(combined_outputs))
@@ -252,6 +237,7 @@ class ClassifierNetwork(pl.LightningModule):
 
         
         logits = self.final(x)
+
 
         return logits
 
@@ -294,74 +280,91 @@ class ClassifierNetwork(pl.LightningModule):
         predicted_labels = torch.argmax(logits, dim=1)
         return predicted_labels
 
+#Do ice analysis on given quality score        
+def iceAnalysis(qidx,dataset,model):
+    minVal=0
+    maxVal=1
+    steps = 101
+    inc = (maxVal - minVal) / (steps - 1)
+    totalPredictions = []
+    for convIdx, conv in enumerate(dataset):
+        convPrediction = []              
+        for value in range(steps):
+            iceVal=minVal+value*inc
+            input_ids = dataset[convIdx][0]
+            attention_masks = dataset[convIdx][1]
+            length = dataset[convIdx][2]
+            readability = dataset[convIdx][3]
+            wordImp = dataset[convIdx][4]
+            repetition = dataset[convIdx][5]
+            subjectivity = dataset[convIdx][6]
+            polarity = dataset[convIdx][7]
+            grammar = dataset[convIdx][8]
+            featureAppearance = dataset[convIdx][9]
+            labels = dataset[convIdx][10]
+            if qidx == 2:
+                length = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+            elif qidx == 3:
+                readability = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+            elif qidx == 4:
+                wordImp = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+            elif qidx == 5:
+                repetition = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+            elif qidx == 6:
+                polarity = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+            elif qidx == 7:
+                subjectivity = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+            elif qidx == 8:
+                featureAppearance = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+            elif qidx == 9:
+                grammar = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
 
-
+            dataset[convIdx] = input_ids,attention_masks,length,readability,wordImp,\
+                    repetition,subjectivity,polarity,grammar,featureAppearance,labels
+            
+            prediction = model.predict(dataset[convIdx])
+            convPrediction.append(prediction)
+        totalPredictions.append(convPrediction)
+    return totalPredictions
+    
 def main():
-    #Keep track of each independent run to load models for later
-    if len(sys.argv) >1:
-        versionNum = sys.argv[1]
-    else: #If I forgot to send in a version, try and generate a unique Vnum.
-        versionNum = random.randint(300,600)
-    #Make sure to specify input files used in readin data.
-    #Get input data from file, this includes the conversation, and its associated quality factors
-    trainidList,trainseekerConv,trainrecommenderConv,trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity, \
-        trainGrammar,trainFeatureAppearance,trainpreservedOrder = readInData('training')
     testidList,testSeekerConv,testRecommenderConv,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,\
         testGrammar,testFeatureAppearance,testpreservedOrder = readInData('test')
 
     #Get label data for train / test
-    trainLabels = readInLabels('training')
-    testLabels = readInLabels('test')
-
-   
+    testLabels = readInLabels('test')   
     #Pad input data so all conversations are the same length
-    trainInput = padConversation(trainpreservedOrder)
     testInput = padConversation(testpreservedOrder)
-
-    #Get data, encode it, pass to dataloader
-    trainDataset = encoderNetwork(gpt2Tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLabels) 
-    testDataset = encoderNetwork(gpt2Tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
-
-    trainDataloader = DataLoader(trainDataset, batch_size=TRAIN_BATCH_SIZE, shuffle=True, collate_fn=customCollate,num_workers=8)
-    testDataloader = DataLoader(testDataset, batch_size=TEST_BATCH_SIZE, shuffle=False, collate_fn=customCollate,num_workers=8)
-
-    #Initialize the CSV Logger for stat tracking
-    logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="gpt2-v"+str(versionNum))
+    testDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
     #encoder classifier model
-    classifier = ClassifierNetwork(model)
+    classifier = ClassifierNetwork.load_from_checkpoint("",model=model)
 
+
+    icedata = {}
+    for i in range(2,10): #2,3,4,5,6,7,8,9, -->indexes of quality scores in dataloader
+        if i ==2:
+            qname='length'
+        elif i ==3:
+            qname='readability'    
+        elif i ==4:
+            qname='wordimportance'
+        elif i ==5:
+            qname='repetition'        
+        elif i ==6:
+            qname='polarity'        
+        elif i ==7:
+            qname='subjectivity'        
+        elif i ==8:
+            qname='featureappearance'
+        elif i ==9:
+            qname='grammar'
+        icedata[qname] = iceAnalysis(i,testDataset,classifier)
+
+    with open('gpt2icedata.pkl','wb') as f:
+        pickle.dump(icedata,f)
+            
     
-    #Initialize the trainer
-    trainer = pl.Trainer(
-        logger=logger,
-        max_epochs=NUM_EPOCHS,
-        enable_progress_bar=True,
-        log_every_n_steps=0,
-        enable_checkpointing=True,
-        callbacks=[pl.callbacks.TQDMProgressBar(refresh_rate=50)]
-    )
-
-    # Train the model
-    trainer.fit(classifier, trainDataloader, testDataloader)
-
-    #Read in metrics from metrics file. Output metrics to stdout
-    results = pd.read_csv(logger.log_dir+"/metrics.csv")
-
-    print("Validation accuracy:",*["%.8f"%(x) for x in
-         results['val_acc'][np.logical_not(np.isnan(results["val_acc"]))]])
-
-    
-    print("Validation loss:",*["%.8f"%(x) for x in
-         results['val_loss'][np.logical_not(np.isnan(results["val_loss"]))]])
-
-    print("Test Accuracy:",*["%.8f"%(x) for x in
-         results['train_acc'][np.logical_not(np.isnan(results["train_acc"]))]])
-
-    print("Training loss:",*["%.8f"%(x) for x in
-         results['train_loss'][np.logical_not(np.isnan(results["train_loss"]))]])
-    
-    
-
 if __name__ == "__main__":
     main()
+

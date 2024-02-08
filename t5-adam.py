@@ -13,18 +13,20 @@ import torch.nn.functional as F
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 from torch.nn.utils.rnn import pad_sequence
+import sys
+import random
 
-
-# Train data 1557 long. 1557 / 173 == 9 even runs through data.
-#Test data 249 long. 249 / 83 = 3 even runs through data.
-TRAIN_BATCH_SIZE = 173
-TEST_BATCH_SIZE = 83
+# Train data 1557 long. 1557 / 9 == 173  even runs through data.
+#Test data 249 long. 249 / 3 == 83 even runs through data.
+#Bigger sizes run into memory allocation problems
+TRAIN_BATCH_SIZE = 9
+TEST_BATCH_SIZE = 3
 NUM_CLASSES=3
-NUM_EPOCHS = 100
+NUM_EPOCHS = 80
 
 # Load pre-trainedT5model and tokenizer
 model = T5ForConditionalGeneration.from_pretrained('t5-base')
-tokenizer = T5Tokenizer.from_pretrained('t5-base')
+tokenizer = T5Tokenizer.from_pretrained('t5-base',model_max_length=1536)
 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 
 
@@ -123,18 +125,19 @@ def customCollate(batch):
     input_ids, attention_masks,length,readability,wordImp,repetition,subjectivity,\
         polarity,grammar,featureAppearance, labels = zip(*batch)
 
+    #Find biggerst conversation in the batch
     max_length = max(len(ids[0]) for ids in input_ids)
     
-    
+    #Pad each conversation inputids and attentionMasks to max_length so they all have the same dimensions
     input_ids = pad_sequence([F.pad(ids, pad=(0, max_length - ids.size(1)), value=0) for ids in input_ids], batch_first=True)
     attention_masks = pad_sequence([F.pad(masks, pad=(0, max_length - masks.size(1)), value=0) for masks in attention_masks], batch_first=True)
 
     #Paddings adds a singleton dimension that causes errors down the line. Squeeze dimension out so that IDS and masks are 
     #[batchSize,sequenceLength] rather than [batchSize,1,sequenceLength]
-    
     input_ids = input_ids.squeeze(dim=1)
     attention_masks = attention_masks.squeeze(dim=1)
-    
+
+    #reshape each quality factor so it is a tensor with 1 dimension    
     length = torch.tensor(length, dtype=torch.float32).view(-1, 1)
     readability = torch.tensor(readability, dtype=torch.float32).view(-1, 1)
     wordImp = torch.tensor(wordImp, dtype=torch.float32).view(-1, 1)
@@ -143,12 +146,8 @@ def customCollate(batch):
     polarity = torch.tensor(polarity, dtype=torch.float32).view(-1, 1)
     grammar = torch.tensor(grammar, dtype=torch.float32).view(-1, 1)
     featureAppearance = torch.tensor(featureAppearance, dtype=torch.float32).view(-1, 1)
-    #labels = torch.nn.functional.one_hot(torch.tensor(labels), num_classes=NUM_CLASSES)
     labels = torch.tensor(labels,dtype=torch.long)
 
-    #print('label is', labels)
-
-    
     return input_ids,attention_masks,length,readability,wordImp,\
             repetition,subjectivity,polarity,grammar,featureAppearance, labels
   
@@ -192,14 +191,14 @@ class encoderNetwork(Dataset):
 
 # Classify the conversation
 class ClassifierNetwork(pl.LightningModule):
-    def __init__(self, t5_model, num_classes=NUM_CLASSES):
+    def __init__(self, model, num_classes=NUM_CLASSES):
         super(ClassifierNetwork, self).__init__()
 
         # Freeze t5 weights
-        for param in t5_model.parameters():
+        for param in model.parameters():
             param.requires_grad = False
 
-        self.t5 = t5_model
+        self.t5 = model
 
         #Projection layer to be used to add residual connections.
         self.projection = nn.Linear(NUM_CLASSES,256)
@@ -225,23 +224,15 @@ class ClassifierNetwork(pl.LightningModule):
         
         outputs = self.t5(input_ids=input_ids,attention_mask=attention_mask,decoder_input_ids=input_ids)
         last_hidden_states = outputs['encoder_last_hidden_state']  # Use last hidden states instead of pooler_output
-        #print("Shapes:", lenScore.shape, readScore.shape, wordScore.shape, repScore.shape, polScore.shape, subScore.shape, featScore.shape, gramScore.shape)
-
+        
         # Take the mean of last hidden states along the sequence dimension
         pooled_output = torch.mean(last_hidden_states, dim=1)
         
         
         scores = torch.cat((lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore), dim=1)
-        #print(f'Scores shape is = {scores.shape}\tPooledOutput=={pooled_output.shape}\tPOOL Output size(1)=={pooled_output.size(1)}\tScires suze 1 = {scores.size(1)}')
         repeated_scores = scores.repeat(1, pooled_output.size(1)//scores.size(1))
-        #print(f'Repeated Scores shape is = {repeated_scores.shape}\tPooledOutput=={pooled_output.shape}')
-        #print('repeated scores is ', repeated_scores)
         # Combine pooled output and repeated scores along a new dimension
         combined_outputs = torch.cat((pooled_output, repeated_scores), dim=1)
-        
-        
-        #print(f'Combined outputs shape={combined_outputs.shape}')
-        
         
         
         #linear layers with residual connections
@@ -271,14 +262,10 @@ class ClassifierNetwork(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore, labels = batch
         logits = self(input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore)
-        #print('Logits in training step:',logits.shape)
         loss = self.loss_fn(logits, labels)
 
-        
         # Calculate accuracy
         preds = torch.argmax(logits, dim=1)
-        #print('TRAINING\nPreds ==',preds, '\nPredsShape=',preds.shape)
-        #print('Line 260, predictions are:', torch.unique(preds))
         acc = self.accuracy(preds, labels)
 
         # Log metrics
@@ -290,13 +277,10 @@ class ClassifierNetwork(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore, labels = batch
         logits = self(input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore)
-        #print('Logits in VALIDATIOn step:',logits.shape)
         loss = self.loss_fn(logits, labels)
 
         # Calculate accuracy
         preds = torch.argmax(logits, dim=1)
-        #print('VALIDATION\nPreds ==',preds, '\nPredsShape=',preds.shape)
-        #print('Line 275, predictions are:', torch.unique(preds))
         acc = self.accuracy(preds, labels)
 
         # Log metrics
@@ -308,17 +292,25 @@ class ClassifierNetwork(pl.LightningModule):
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=2e-5)
 
+    def predict(self,batch):
+        input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore, labels = batch
+        logits = self(input_ids, attention_mask, lenScore, readScore, wordScore, repScore, polScore, subScore, featScore, gramScore)
+        predicted_labels = torch.argmax(logits, dim=1)
+        return predicted_labels
+
+        
+
 
 
 def main():
-    #Input files used 
-    #trainfilename = 'TRAIN_combinedData.txt'
-    #testfilename = 'TEST_combinedData.txt'
 
-    #Target label files used
-    #trainTargetFilename = 'TRAIN_Labels_CombinedData.csv'
-    #testTargetFilename = 'TEST_Labels_CombinedData.csv'
+    #Keep track of each independent run to load models for later
+    if len(sys.argv) >1:
+        versionNum = sys.argv[1]
+    else: #If I forgot to send in a version, try and generate a unique Vnum.
+        versionNum = random.randint(300,600)
 
+    #Make sure to specify input files used in readin data.
     #Get input data from file, this includes the conversation, and its associated quality factors
     trainidList,trainseekerConv,trainrecommenderConv,trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity, \
         trainGrammar,trainFeatureAppearance,trainpreservedOrder = readInData('training')
@@ -334,9 +326,7 @@ def main():
     trainInput = padConversation(trainpreservedOrder)
     testInput = padConversation(testpreservedOrder)
 
-    
-    
-    
+    #Get data, encode it, pass to dataloader
     trainDataset = encoderNetwork(tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLabels) 
     testDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
@@ -344,7 +334,7 @@ def main():
     testDataloader = DataLoader(testDataset, batch_size=TEST_BATCH_SIZE, shuffle=False, collate_fn=customCollate,num_workers=8)
 
     #Initialize the CSV Logger for stat tracking
-    logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="T5")
+    logger = pl.loggers.CSVLogger("lightning_logs", name="ClassifierTest", version="T5-v"+str(versionNum))
 
     #encoder classifier model
     classifier = ClassifierNetwork(model)
