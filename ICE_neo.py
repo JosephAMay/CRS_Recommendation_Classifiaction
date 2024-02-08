@@ -6,7 +6,7 @@ import torchmetrics
 import torchvision
 import torch.nn as nn
 import torch.optim as optim
-from transformers import GPT2Tokenizer, GPT2Model
+from transformers import GPTNeoModel, GPT2Tokenizer
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
