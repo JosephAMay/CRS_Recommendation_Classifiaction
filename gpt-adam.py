@@ -319,8 +319,8 @@ def main():
     testInput = padConversation(testpreservedOrder)
 
     #Get data, encode it, pass to dataloader
-    trainDataset = encoderNetwork(gpt2Tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLabels) 
-    testDataset = encoderNetwork(gpt2Tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
+    trainDataset = encoderNetwork(tokenizer,trainInput, trainLength,trainReadability,trainWordImp,trainRepetition,trainSubjectivity,trainPolarity,trainGrammar,trainFeatureAppearance, trainLabels) 
+    testDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
     trainDataloader = DataLoader(trainDataset, batch_size=TRAIN_BATCH_SIZE, shuffle=True, collate_fn=customCollate,num_workers=8)
     testDataloader = DataLoader(testDataset, batch_size=TEST_BATCH_SIZE, shuffle=False, collate_fn=customCollate,num_workers=8)
