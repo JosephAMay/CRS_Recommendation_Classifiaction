@@ -24,7 +24,7 @@ NUM_EPOCHS = 80
 
 # Load pre-trainedT5model and tokenizer
 model = T5ForConditionalGeneration.from_pretrained('t5-base')
-tokenizer = T5Tokenizer.from_pretrained('t5-base')
+tokenizer = T5Tokenizer.from_pretrained('t5-base',model_max_length=1536)
 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 
 
@@ -144,18 +144,18 @@ class encoderNetwork(Dataset):
         input_ids = encoding["input_ids"]
         attention_mask = encoding["attention_mask"]
         
-        input_ids = encoding["input_ids"].clone().detach()
-        attention_mask = encoding["attention_mask"].clone().detach()
+        input_ids = encoding["input_ids"].clone().detach().to(device)
+        attention_mask = encoding["attention_mask"].clone().detach().to(device)
+        lenScore = torch.tensor(self.length[idx]).view(-1, 1).clone().detach().to(device)
+        readScore = torch.tensor(self.readability[idx]).view(-1, 1).clone().detach().to(device)
+        wordScore = torch.tensor(self.wordImp[idx]).view(-1, 1).clone().detach().to(device)
+        repScore = torch.tensor(self.repetition[idx]).view(-1, 1).clone().detach().to(device)
+        polScore =  torch.tensor(self.polarity[idx]).view(-1, 1).clone().detach().to(device)
+        subScore =  torch.tensor(self.subjectivity[idx]).view(-1, 1).clone().detach().to(device)
+        featScore =  torch.tensor(self.featApp[idx]).view(-1, 1).clone().detach().to(device)
+        gramScore= torch.tensor(self.grammar[idx]).view(-1, 1).clone().detach().to(device)
+        label = torch.tensor([int(self.labels[idx])], dtype=torch.long).clone().detach().to(device)
         
-        lenScore = torch.tensor(self.length[idx]).view(-1, 1).clone().detach()
-        readScore = torch.tensor(self.readability[idx]).view(-1, 1).clone().detach()
-        wordScore = torch.tensor(self.wordImp[idx]).view(-1, 1).clone().detach()
-        repScore = torch.tensor(self.repetition[idx]).view(-1, 1).clone().detach()
-        polScore =  torch.tensor(self.polarity[idx]).view(-1, 1).clone().detach()
-        subScore =  torch.tensor(self.subjectivity[idx]).view(-1, 1).clone().detach()
-        featScore =  torch.tensor(self.featApp[idx]).view(-1, 1).clone().detach()
-        gramScore= torch.tensor(self.grammar[idx]).view(-1, 1).clone().detach()
-        label = torch.tensor([int(self.labels[idx])], dtype=torch.long).clone().detach()
         return input_ids, attention_mask, lenScore,readScore,wordScore,repScore,polScore,subScore,featScore,gramScore, label
 
     def __setitem__(self, idx,value):
