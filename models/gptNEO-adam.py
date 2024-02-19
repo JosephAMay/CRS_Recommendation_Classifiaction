@@ -360,10 +360,10 @@ def main():
     print("Validation loss:",*["%.8f"%(x) for x in
          results['val_loss'][np.logical_not(np.isnan(results["val_loss"]))]])
 
-    print("Test Accuracy:",*["%.8f"%(x) for x in
+    print("Train accuracy:",*["%.8f"%(x) for x in
          results['train_acc'][np.logical_not(np.isnan(results["train_acc"]))]])
 
-    print("Training loss:",*["%.8f"%(x) for x in
+    print("Train loss:",*["%.8f"%(x) for x in
          results['train_loss'][np.logical_not(np.isnan(results["train_loss"]))]])
     
     

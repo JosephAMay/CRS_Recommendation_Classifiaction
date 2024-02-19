@@ -339,7 +339,7 @@ def main():
     testDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
     #encoder classifier model
-    classifier = ClassifierNetwork.load_from_checkpoint("",model=model)
+    classifier = ClassifierNetwork.load_from_checkpoint("neo_pretrain.ckpt",model=model,device=device)
     
     icedata = {}
     for i in range(2,10): #2,3,4,5,6,7,8,9, -->indexes of quality scores in dataloader
@@ -361,7 +361,7 @@ def main():
             qname='grammar'
         icedata[qname] = iceAnalysis(i,testDataset,classifier)
 
-    with open('gpt2icedata.pkl','wb') as f:
+    with open('neoicedata.pkl','wb') as f:
         pickle.dump(icedata,f)
 
 if __name__ == "__main__":

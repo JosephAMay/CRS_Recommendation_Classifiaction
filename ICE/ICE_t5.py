@@ -338,7 +338,7 @@ def main():
     testDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
     #encoder classifier model
-    classifier = ClassifierNetwork.load_from_checkpoint("",model=model)
+    classifier = ClassifierNetwork.load_from_checkpoint("t5_pretrain.ckpt",model=model,device=device)
 
 
     icedata = {}
@@ -361,7 +361,7 @@ def main():
             qname='grammar'
         icedata[qname] = iceAnalysis(i,testDataset,classifier)
 
-    with open('gpt2icedata.pkl','wb') as f:
+    with open('t5icedata.pkl','wb') as f:
         pickle.dump(icedata,f)
             
     
