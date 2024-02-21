@@ -281,52 +281,71 @@ class ClassifierNetwork(pl.LightningModule):
         predicted_labels = torch.argmax(logits, dim=1)
         return predicted_labels
 
-#Do ice analysis on given quality score        
-def iceAnalysis(qidx,dataset,model):
-    minVal=0
-    maxVal=1
-    steps = 101
-    inc = (maxVal - minVal) / (steps - 1)
+#Do shap nalysis 
+def calcShap(dataset, backgroundData,model):
     totalPredictions = []
     for convIdx, conv in enumerate(dataset):
-        convPrediction = []              
-        for value in range(steps):
-            iceVal=minVal+value*inc
+        convPrediction = []
+        randidx = random.randint(0, len(backgroundData) - 1)
+        for qidx in range(2,10): #start at length index, go up to 9 for featureAppearance
+            
+            prediction = model.predict(dataset[convIdx])
+            
+            
+            #Grab factors of this conversation
             input_ids = dataset[convIdx][0]
             attention_masks = dataset[convIdx][1]
             length = dataset[convIdx][2]
             readability = dataset[convIdx][3]
             wordImp = dataset[convIdx][4]
             repetition = dataset[convIdx][5]
-            subjectivity = dataset[convIdx][6]
-            polarity = dataset[convIdx][7]
-            grammar = dataset[convIdx][8]
-            featureAppearance = dataset[convIdx][9]
+            polarity = dataset[convIdx][6]
+            subjectivity = dataset[convIdx][7]
+            featureAppearance = dataset[convIdx][8]
+            grammar = dataset[convIdx][9]
             labels = dataset[convIdx][10]
+
+            #grab current values to reset data back to original state after 
+            #adjusting a vlue for shap
+            oldlength = length
+            oldreadability = readability
+            oldwordImp = wordImp
+            oldrepetition = repetition
+            oldpolarity = polarity
+            oldsubjectivity = subjectivity
+            oldfeatureAppearance = featureAppearance
+            oldgrammar = grammar
+            
             if qidx == 2:
-                length = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+                length = backgroundData[randidx][2]
             elif qidx == 3:
-                readability = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+                readability = backgroundData[randidx][3]
             elif qidx == 4:
-                wordImp = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+                wordImp = backgroundData[randidx][4]
             elif qidx == 5:
-                repetition = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+                repetition = backgroundData[randidx][5]
             elif qidx == 6:
-                polarity = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+                polarity = backgroundData[randidx][6]
             elif qidx == 7:
-                subjectivity = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+                subjectivity = backgroundData[randidx][7]
             elif qidx == 8:
-                featureAppearance = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+                featureAppearance = backgroundData[randidx][8]
             elif qidx == 9:
-                grammar = torch.tensor(iceVal, dtype=torch.float32).view(-1, 1)
+                grammar = backgroundData[randidx][9]
 
             dataset[convIdx] = input_ids,attention_masks,length,readability,wordImp,\
                     repetition,subjectivity,polarity,grammar,featureAppearance,labels
             
-            prediction = model.predict(dataset[convIdx])
-            convPrediction.append(prediction)
+            backgroundPrediction = model.predict(dataset[convIdx])
+            
+            #Reset testdata to have original information
+            dataset[convIdx] = input_ids,attention_masks,oldlength,oldreadability,oldwordImp,\
+                    oldrepetition,oldsubjectivity,oldpolarity,oldgrammar,oldfeatureAppearance,labels
+            shapValue = prediction-backgroundPrediction
+            
+            convPrediction.append(shapValue.item())
         totalPredictions.append(convPrediction)
-    return totalPredictions
+    return np.array(totalPredictions)
 
 def main():
     testidList,testSeekerConv,testRecommenderConv,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,\
@@ -338,31 +357,27 @@ def main():
     testInput = padConversation(testpreservedOrder)
     testDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
 
+
+    testidList = testidList[0:83]
+    testSeekerConv = testSeekerConv[0:83]
+    testRecommenderConv= testRecommenderConv[0:83]
+    testLength =testLength[0:83]
+    testReadability = testReadability[0:83]
+    testWordImp = testWordImp[0:83]
+    testRepetition = testRepetition[0:83]
+    testSubjectivity = testSubjectivity[0:83]
+    testPolarity = testPolarity[0:83]
+    testGrammar =testGrammar[0:83]
+    testFeatureAppearance = testFeatureAppearance[0:83]
+    testpreservedOrder = testpreservedOrder[0:83]
+
+    padConv = padConversation(testpreservedOrder)
+    backgroundDataset = encoderNetwork(tokenizer,testInput,testLength,testReadability,testWordImp,testRepetition,testSubjectivity,testPolarity,testGrammar,testFeatureAppearance,testLabels) 
+
     #encoder classifier model
     classifier = ClassifierNetwork.load_from_checkpoint("neo_pretrain.ckpt",model=model,device=device)
-    
-    icedata = {}
-    for i in range(2,10): #2,3,4,5,6,7,8,9, -->indexes of quality scores in dataloader
-        if i ==2:
-            qname='length'
-        elif i ==3:
-            qname='readability'    
-        elif i ==4:
-            qname='wordimportance'
-        elif i ==5:
-            qname='repetition'        
-        elif i ==6:
-            qname='polarity'        
-        elif i ==7:
-            qname='subjectivity'        
-        elif i ==8:
-            qname='featureappearance'
-        elif i ==9:
-            qname='grammar'
-        icedata[qname] = iceAnalysis(i,testDataset,classifier)
-
-    with open('neoicedata.pkl','wb') as f:
-        pickle.dump(icedata,f)
+    shapValues = calcShap(testDataset,backgroundDataset,classifier)
+    np.savetxt('neo_shap.txt', shapValues)
 
 if __name__ == "__main__":
     main()
