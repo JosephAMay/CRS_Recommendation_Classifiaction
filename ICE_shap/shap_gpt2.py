@@ -283,7 +283,7 @@ def calcShap(dataset, backgroundData,model):
     totalPredictions = []
     for convIdx, conv in enumerate(dataset):
         convPrediction = []
-        randidx = random.randint(0, len(backgroundData) - 1)
+        randidx = random.randint(0, 82)
         for qidx in range(2,10): #start at length index, go up to 9 for featureAppearance
             
             prediction = model.predict(dataset[convIdx])

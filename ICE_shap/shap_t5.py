@@ -14,7 +14,7 @@ import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 from torch.nn.utils.rnn import pad_sequence
 import pickle
-
+import random
 # Train data 1557 long. 1557 / 9 == 173  even runs through data.
 #Test data 249 long. 249 / 3 == 83 even runs through data.
 TRAIN_BATCH_SIZE = 9
@@ -285,7 +285,7 @@ def calcShap(dataset, backgroundData,model):
     totalPredictions = []
     for convIdx, conv in enumerate(dataset):
         convPrediction = []
-        randidx = random.randint(0, len(backgroundData) - 1)
+        randidx = random.randint(0, 82)
         for qidx in range(2,10): #start at length index, go up to 9 for featureAppearance
             
             prediction = model.predict(dataset[convIdx])
